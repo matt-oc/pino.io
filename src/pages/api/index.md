@@ -2,507 +2,782 @@
 layout: main.html
 ---
 
-# API reference
-The Seneca API is pretty *tiny*. We try hard to keep any non-essential
-functionality out of core.  Instead, we push it out to [plugins][]. The core API
-is documented below. If you have any further questions, [get in touch][]. We
-love to talk!
+## Documentation
 
-## act(input [, callback])
-- __input:__ - `object`: matches enumerable keys against previously added action
-  patterns.  Once a match is discovered, the entire `input` object is passed to
-  the `action` handler established in the related `add` function.
-- __callback:__ - `function`: any errors are passed as the first argument. If a
-  result is provided by the `action` handler then it will be passed as the
-  second argument.
+[Extremely fast](#benchmarks) node.js logger, inspired by Bunyan.
+It also includes a shell utility to pretty-print its log files.
 
-The act method is used to fire actions defined using `add`. It is composed of an input pattern and a callback. When a pattern is matched against an action, that action is performed and the result is provided in the callback.
+* [Installation](#install)
+* [Usage](#usage)
+* [Benchmarks](#benchmarks)
+* [API](#api)
+* [Extreme mode explained](#extreme)
+* [How to use Pino with Express](#express)
+* [How to use Pino with Hapi](#hapi)
+* [How to use Pino with Restify](#restify)
+* [How to use Pino with Koa](#koa)
+* [How do I rotate log files?](#rotate)
+* [How to use Transports with Pino](#transports)
+* [Caveats](#caveats)
 
-___Example: Simple___
 
-```javascript
-seneca.add({cmd: 'salestax'}, function (msg, respond) {
-  respond(null, {total: '123'})
-})
+## Install
 
-seneca.act({cmd: 'salestax'}, function (err, res) {
-  if (err) console.error(err)
-  console.log('Total: ' + res.total)
-})
+```
+npm install pino --save
 ```
 
-___Example: With arguments___
+## Usage
 
-```javascript
-seneca.add({ cmd: 'salestax' }, function (msg, respond) {
-  var rate  = 0.23
-  var total = msg.net * (1 + rate)
-  respond(null, { total: total })
-})
+```js
+'use strict'
 
-seneca.act({cmd: 'salestax', net: 100}, function (err, res) {
-  if (err) console.error(err)
-  console.log('Total: ' + res.total)
+var pino = require('pino')()
+
+pino.info('hello world')
+pino.error('this is at error level')
+pino.info('the answer is %d', 42)
+pino.info({ obj: 42 }, 'hello world')
+pino.info({ obj: 42, b: 2 }, 'hello world')
+pino.info({ obj: { aa: 'bbb' } }, 'another')
+setImmediate(function () {
+  pino.info('after setImmediate')
 })
+pino.error(new Error('an error'))
+
+var child = pino.child({ a: 'property' })
+child.info('hello child!')
+
+var childsChild = child.child({ another: 'property' })
+childsChild.info('hello baby..')
+
 ```
 
-___Example: Specific Patterns___
+This produces:
 
-Note how more specific acts match against more specific definitions
+```
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"hello world","time":1459529098958,"v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":50,"msg":"this is at error level","time":1459529098959,"v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"the answer is 42","time":1459529098960,"v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"hello world","time":1459529098960,"obj":42,"v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"hello world","time":1459529098960,"obj":42,"b":2,"v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"another","time":1459529098960,"obj":{"aa":"bbb"},"v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":50,"msg":"an error","time":1459529098961,"type":"Error","stack":"Error: an error\n    at Object.<anonymous> (/Users/davidclements/z/nearForm/pino/example.js:14:12)\n    at Module._compile (module.js:435:26)\n    at Object.Module._extensions..js (module.js:442:10)\n    at Module.load (module.js:356:32)\n    at Function.Module._load (module.js:311:12)\n    at Function.Module.runMain (module.js:467:10)\n    at startup (node.js:136:18)\n    at node.js:963:3","v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"hello child!","time":1459529098962,"a":"property","v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"hello baby..","time":1459529098962,"another":"property","a":"property","v":1}
+{"pid":94473,"hostname":"MacBook-Pro-3.home","level":30,"msg":"after setImmediate","time":1459529098963,"v":1}
 
-```javascript
-// fixed rate
-seneca.add({ cmd: 'salestax' }, function (msg, respond) {
-  var rate  = 0.23
-  var total = msg.net * (1 + rate)
-  respond(null, { total: total })
-})
+```
 
-// local rates
-seneca.add({ cmd: 'salestax', country: 'US' }, function (msg, respond) {
-  var state = {
-    'NY': 0.04,
-    'CA': 0.0625
-    // ...
+<a name="benchmarks"></a>
+## Benchmarks
+
+As far as we know, it is the fastest logger in town:
+
+`pino.info('hello world')`:
+
+```
+benchBunyan*10000: 1140ms
+benchWinston*10000: 1888ms
+benchBole*10000: 1594ms
+benchDebug*10000: 390ms
+benchLogLevel*10000: 371ms
+benchPino*10000: 291ms
+benchPinoExreme*10000: 115ms
+```
+
+`pino.info({'hello': 'world'})`:
+
+```
+benchBunyanObj*10000: 1355ms
+benchWinstonObj*10000: 2012ms
+benchBoleObj*10000: 1614ms
+benchLogLevelObject*10000: 1456ms
+benchPinoObj*10000: 369ms
+benchPinoUnsafeObj*10000: 353ms
+benchPinoExtremeObj*10000: 165ms
+benchPinoUnsafeExtremeObj*10000: 158ms
+```
+
+`pino.info(aBigDeeplyNestedObject)`:
+```
+```
+
+`pino.info('hello %s %j %d', 'world', {obj: true}, 4, {another: 'obj'})`:
+
+```
+benchDebugInterpolateExtra*10000: 735ms
+benchBunyanInterpolateExtra*10000: 2978ms
+benchWinstonInterpolateExtra*10000: 2644ms
+benchBoleInterpolateExtra*10000: 3564ms
+benchLogLevelInterpolateExtra*10000: 1946ms
+benchPinoInterpolateExtra*10000: 638ms
+benchPinoUnsafeInterpolateExtra*10000: 527ms
+benchPinoExtremeInterpolateExtra*10000: 417ms
+benchPinoUnsafeExtremeInterpolateExtra*10000: 303ms
+```
+
+In multiple cases, pino is over 6x faster than alternatives.
+
+For a fair comparison, [LogLevel](http://npm.im/loglevel) was extended
+to include a timestamp.
+
+<a name="cli"></a>
+## CLI
+
+To use the command line tool, we can install `pino` globally:
+
+```sh
+npm install -g pino
+```
+
+Then we simply pipe a log file through `pino`:
+
+```sh
+cat log | pino
+```
+
+There's also a transformer flag that converts Epoch timestamps to ISO timestamps.
+
+```sh
+cat log | pino -t
+```
+
+For instance, `pino -t` will transform this:
+
+```js
+{"pid":14139,"hostname":"MacBook-Pro-3.home","level":30,"msg":"hello world","time":1457537229339,"v":0}
+```
+
+Into this:
+
+```js
+{"pid":14139,"hostname":"MacBook-Pro-3.home","level":30,"msg":"hello world","time":"2016-03-09T15:27:09.339Z","v":0}
+```
+
+<a name="api"></a>
+## API
+
+  * <a href="#constructor"><code><b>pino()</b></code></a>
+  * <a href="#child"><code>logger.<b>child()</b></code></a>
+  * <a href="#level"><code>logger.<b>level</b></code></a>
+  * <a href="#fatal"><code>logger.<b>fatal()</b></code></a>
+  * <a href="#error"><code>logger.<b>error()</b></code></a>
+  * <a href="#warn"><code>logger.<b>warn()</b></code></a>
+  * <a href="#info"><code>logger.<b>info()</b></code></a>
+  * <a href="#debug"><code>logger.<b>debug()</b></code></a>
+  * <a href="#trace"><code>logger.<b>trace()</b></code></a>
+  * <a href="#levelVal"><code>logger.<b>levelVal</b></code></a>
+  * <a href="#level-change"><code>logger.on(<b>'level-change'</b>, fn)</code></a>
+  * <a href="#levelValues"><code>logger.levels.<b>values</b></code> & <code>pino.levels.<b>values</b></code></a>
+  * <a href="#levelLabels"><code>logger.levels.<b>labels</b></code> & <code>pino.levels.<b>labels</b></code></a>
+  * <a href="#log_version"><code>pino.<b>LOG_VERSION</b></code> & <code>logger.<b>LOG_VERSION</b></code></a>
+  * <a href="#reqSerializer"><code>pino.stdSerializers.<b>req</b></code></a>
+  * <a href="#resSerializer"><code>pino.stdSerializers.<b>res</b></code></a>
+  * <a href="#errSerializer"><code>pino.stdSerializers.<b>err</b></code></a>
+  * <a href="#pretty"><code>pino.<b>pretty()</b></code></a>
+
+
+<a name="constructor"></a>
+### pino([opts], [stream])
+
+Returns a new logger. Allowed options are:
+
+* `safe`: avoid error causes by circular references in the object tree,
+  default `true`
+* `name`: the name of the logger, default `undefined`
+* `serializers`: an object containing functions for custom serialization of objects. These functions should return an JSONifiable object and they should never throw
+* `slowtime`: Outputs ISO time stamps (`'2016-03-09T15:18:53.889Z'`) instead of Epoch time stamps (`1457536759176`). **WARNING**: This option carries a 25% performance drop, we recommend using default Epoch timestamps and transforming logs after if required. The `pino -t` command will do this for you (see [CLI](#cli)). default `false`.
+* `extreme`: Enables extreme mode, yields an additional 60% performance (from 250ms down to 100ms per 10000 ops). There are trade-off's should be understood before usage. See [Extreme mode explained](#extreme). default `false`
+
+`stream` is a Writable stream, defaults to `process.stdout`.
+
+Example:
+
+```js
+'use strict'
+
+var pino = require('pino')
+var logger = ({
+  name: 'myapp',
+  safe: true,
+  serializers: {
+    req: pino.stdSerializers.req
+    res: pino.stdSerializers.res
   }
-  var rate = state[msg.state]
-  var total = msg.net * (1 + rate)
-  respond(null, { total: total })
 })
+```
 
-// categories
-seneca.add({ cmd: 'salestax', country: 'IE' }, function (msg, respond) {
-  var category = {
-    'top': 0.23,
-    'reduced': 0.135
-    // ...
+<a name="child"></a>
+### logger.child(bindings)
+
+Creates a child logger, setting all key-value pairs in `bindings` as
+properties in the log lines. All serializers will be applied to the
+given pair.
+
+Example:
+
+```js
+logger.child({ a: 'property' }).info('hello child!')
+// generates
+// {"pid":46497,"hostname":"MacBook-Pro-di-Matteo.local","level":30,"msg":"hello child!","time":1458124707120,"v":0,"a":"property"}
+```
+
+Child loggers use the same output stream as the parent and inherit
+the current log level of the parent at the time they are spawned.
+
+From v2.x.x the log level of a child is mutable (whereas in
+v1.x.x it was immutable), and can be set independently of the parent.
+
+For example
+
+```
+var logger = pino()
+logger.level = 'error'
+logger.info('nope') //does not log
+var child = logger.child({foo: 'bar'})
+child.info('nope again') //does not log
+child.level = 'info'
+child.info('hooray') //will log
+logger.info('nope nope nope') //will not log, level is still set to error
+```
+
+Also from version 2.x.x we can spawn child loggers from child loggers, for instance
+
+```
+var logger = pino()
+var child = logger.child({father: true})
+var childChild = child.child({baby: true})
+```
+
+Child logger creation is fast:
+
+```
+benchBunyanCreation*10000: 1291.332ms
+benchBoleCreation*10000: 1630.542ms
+benchPinoCreation*10000: 352.330ms
+benchPinoExtremeCreation*10000: 102.282ms
+```
+
+Logging through a child logger has little performance penalty:
+
+```
+benchBunyanChild*10000: 1343.933ms
+benchBoleChild*10000: 1605.969ms
+benchPinoChild*10000: 334.573ms
+benchPinoExtremeChild*10000: 152.792ms
+```
+
+Spawning children from children has negligible overhead:
+
+```
+benchBunyanChildChild*10000: 1397.202ms
+benchPinoChildChild*10000: 338.930ms
+benchPinoExtremeChildChild*10000: 150.143ms
+```
+
+<a name="level"></a>
+### logger.level
+
+Set this property to the desired logging level.
+
+In order of priority, available levels are:
+
+  1. <a href="#fatal">`'fatal'`</a>
+  2. <a href="#error">`'error'`</a>
+  3. <a href="#warn">`'warn'`</a>
+  4. <a href="#info">`'info'`</a>
+  5. <a href="#debug">`'debug'`</a>
+  6. <a href="#trace">`'trace'`</a>
+
+Example: `logger.level = 'info'`
+
+The logging level is a *minimum* level. For instance if `logger.level` is `'info'` then all `fatal`, `error`, `warn`, and `info` logs will be enabled.
+
+<a name="fatal"></a>
+### logger.fatal([obj], msg, [...])
+
+Log at `'fatal'` level the given `msg`. If the first argument is an
+object, all its properties will be included in the JSON line.
+If more args follows `msg`, these will be used to format `msg` using
+[`util.format`](https://nodejs.org/api/util.html#util_util_format_format)
+
+<a name="error"></a>
+### logger.error([obj], msg, [...])
+
+Log at `'error'` level the given `msg`. If the first argument is an
+object, all its properties will be included in the JSON line.
+If more args follows `msg`, these will be used to format `msg` using
+[`util.format`](https://nodejs.org/api/util.html#util_util_format_format)
+
+<a name="warn"></a>
+### logger.warn([obj], msg, [...])
+
+Log at `'warn'` level the given `msg`. If the first argument is an
+object, all its properties will be included in the JSON line.
+If more args follows `msg`, these will be used to format `msg` using
+[`util.format`](https://nodejs.org/api/util.html#util_util_format_format)
+
+<a name="info"></a>
+### logger.info([obj], msg, [...])
+
+Log at `'info'` level the given `msg`. If the first argument is an
+object, all its properties will be included in the JSON line.
+If more args follows `msg`, these will be used to format `msg` using
+[`util.format`](https://nodejs.org/api/util.html#util_util_format_format)
+
+<a name="debug"></a>
+### logger.debug([obj], msg, [...])
+
+Log at `'debug'` level the given `msg`. If the first argument is an
+object, all its properties will be included in the JSON line.
+If more args follows `msg`, these will be used to format `msg` using
+[`util.format`](https://nodejs.org/api/util.html#util_util_format_format)
+
+<a name="trace"></a>
+### logger.trace([obj], msg, [...])
+
+Log at `'trace'` level the given `msg`. If the first argument is an
+object, all its properties will be included in the JSON line.
+If more args follows `msg`, these will be used to format `msg` using
+[`util.format`](https://nodejs.org/api/util.html#util_util_format_format)
+
+<a name="levelVal"></a>
+### logger.levelVal
+
+Returns the integer value for the logger instance's logging level.
+
+<a name="level-change"></a>
+### logger.on('level-change', fn)
+
+Registers a listener function that is triggered when the level is changed.
+
+The listener is passed four arguments: `levelLabel`, `levelValue`, `previousLevelLabel`, `previousLevelValue`.
+
+**Note:** When browserified, this functionality will only be available if the `events` module has been required else where (e.g. if you're using streams in the browser). This allows for a trade-off between bundle size and functionality.
+
+```js
+var listener = function (lvl, val, prevLvl, prevVal) {
+  console.log(lvl, val, prevLvl, prevVal)
+}
+logger.on('level-change', listener)
+logger.level = 'trace' // trigger console message
+logger.removeListener('level-change', listener)
+logger.level = 'info' // no message, since listener was removed
+```
+
+<a name="levelValues"></a>
+### logger.levels.values & pino.levels.values
+
+Returns the mappings of level names to their respective internal number
+representation. For example:
+
+```js
+pino.levels.values.error === 50 // true
+```
+
+<a name="levelLabels"></a>
+### logger.levels.labels & pino.levels.labels
+
+Returns the mappings of level internal level numbers to their string
+representations. For example:
+
+```js
+pino.levels.labels[50] === 'error' // true
+```
+
+<a name="log_version"></a>
+### logger.LOG_VERSION & pino.LOG_VERSION
+
+Read only. Holds the current log format version (as output in the `v` property of each log record).
+
+
+<a name="reqSerializer"></a>
+### pino.stdSerializers.req
+
+Generates a JSONifiable object from the HTTP `request` object passed to
+the `createServer` callback of Node's HTTP server.
+
+It returns an object in the form:
+
+```js
+{
+  pid: 93535,
+  hostname: 'your host',
+  level: 30,
+  msg: 'my request',
+  time: '2016-03-07T12:21:48.766Z',
+  v: 0,
+  req: {
+    method: 'GET',
+    url: '/',
+    headers: {
+      host: 'localhost:50201',
+      connection: 'close'
+    },
+    remoteAddress: '::ffff:127.0.0.1',
+    remotePort: 50202
   }
-  var rate = category[msg.category]
-  var total = msg.net * (1 + rate)
-  respond(null, { total: total })
-})
-
-// will match least specific action
-seneca.act({cmd: 'salestax', net: 100}, function (err, res) {
-  if (err) console.error(err)
-  console.log('Generic: ' + res.total)
-})
-
-// will match the same as generic
-seneca.act({cmd: 'salestax', net: 100, country: 'DE'}, function (err, res) {
-  if (err) console.error(err)
-  console.log('DE: ' + res.total)
-})
-
-// will find its own specific match
-seneca.act({cmd: 'salestax', net: 100, country: 'US', state: 'NY'}, function (err, res) {
-  if (err) console.error(err)
-  console.log('US, NY: ' + res.total)
-})
-
-// will find its own, even more specific match
-seneca.act({cmd: 'salestax', net: 100, country: 'IE', category: 'reduced'}, function (err, res) {
-  if (err) console.error(err)
-  console.log('IE: ' + res.total)
-})
+}
 ```
 
-___Example: Chaining___
+<a name="resSerializer"></a>
+### pino.stdSerializers.res
 
-Acts can be chained
+Generates a JSONifiable object from the HTTP `response` object passed to
+the `createServer` callback of Node's HTTP server.
 
-```javascript
-seneca
-.act({cmd: 'salestax', net: 500, country: 'IE', category: 'top'}, function (err, res) {
-  if (err) console.error(err)
-  console.log('IE: ' + res.total)
-})
-.act({cmd: 'salestax', net: 500, country: 'IE', category: 'reduced'}, function (err, res) {
-  if (err) console.error(err)
-  console.log('IE: ' + res.total)
-})
+It returns an object in the form:
+
+```js
+{
+  pid: 93581,
+  hostname: 'myhost',
+  level: 30,
+  msg: 'my response',
+  time: '2016-03-07T12:23:18.041Z',
+  v: 0,
+  res: {
+    statusCode: 200,
+    header: 'HTTP/1.1 200 OK\r\nDate: Mon, 07 Mar 2016 12:23:18 GMT\r\nConnection: close\r\nContent-Length: 5\r\n\r\n'
+  }
+}
 ```
 
-## add(pattern [, paramspec], action)
-- __pattern__ - `object` or `string`: matches the pattern specification.
-- __paramspec__ - `object`: matches the parameter specification.
-- __action__ - `function(...)`: matches the action signature.
+<a name="errSerializer"></a>
+### pino.stdSerializers.err
 
-This method adds an **action** to the Seneca instance.  You provide a
-*key/value pair* pattern that Seneca matches against objects that are submitted
-using the `add` method. When an object is submitted, Seneca checks the object's
-top-level properties in alphabetical order to see if there is a matching action.
+Serializes an `Error` object if passed in as an property.
 
-The `action` parameter is a function that accepts two arguments. The first is
-the pattern object that was submitted to `act()` below. The second is a
-*callback* that you must call once your action has completed its work. The
-callback has the standard node.js signature: `function (err, result)`. The
-callback must be executed, especially to report errors. The action result is
-optional; you do not have to supply one if it does not make sense for your action.
-However, if you do provide a result it needs to be an object or array, unless
-you have disabled `strict` mode.
-
-```javascript
-seneca.add({ foo:'bar' }, function (msg, respond) {
-  respond(null, { zoo: msg.zoo })
-})
-
-seneca.act({ foo:'bar', zoo:'qaz' }, function (err, out) {
-  console.log(out.zoo)
-})
+```js
+{
+  "pid": 40510,
+  "hostname": "MBP-di-Matteo",
+  "level": 50,
+  "msg": "an error",
+  "time": 1459433282301,
+  "v": 1,
+  "type": "Error",
+  "stack": "Error: an error\n    at Object.<anonymous> (/Users/matteo/Repositories/pino/example.js:16:7)\n    at Module._compile (module.js:435:26)\n    at Object.Module._extensions..js (module.js:442:10)\n    at Module.load (module.js:356:32)\n    at Function.Module._load (module.js:313:12)\n    at Function.Module.runMain (module.js:467:10)\n    at startup (node.js:136:18)\n    at node.js:963:3"
+}
 ```
 
-___Example: defining an action___
+<a name="pretty"></a>
+### pino.pretty([opts])
 
-You can define actions any time, anywhere. They don't need to be associated with
-a plugin. Actions defined inside a plugin do get some logging metadata, however,
-so they can be easier to debug.  The key usefulness of a plugin, though, is the
-ability to ship functionality and reuse it in other services.
+Returns a transform stream that formats JSON output into pretty print
+output as per the [cli](#cli) tool.
 
-## client(options)
-- __options:__ object, transport options.
+Options:
 
-The client method connects to a listening seneca service.
+* `timeTransOnly`, if set to `true`, it will only covert the unix timestamp to
+  ISO 8601 date format, and reserialize the JSON (equivalent to `pino -t`).
 
-___Example: Accessing store in another seneca instance___
+You can use the pretty transformer internally, like so:
 
-Setup a sample service (e.g. `store-provider.js`), using `listen` (see section below for more info on `listen` method).
+```js
+'use strict'
 
-```javascript
-var seneca = require('seneca')()
+var pino = require('pino')
+var pretty = pino.pretty()
+pretty.pipe(process.stdout)
+var log = pino({
+  name: 'app',
+  safe: true
+}, pretty)
 
-seneca.use('level-store', {
-  folder: 'db' // make sure this folder exists
-})
-
-seneca.listen({
-  host: 'localhost',
-  port: '4050'
-})
+log.child({ widget: 'foo' }).info('hello')
+log.child({ widget: 'bar' }).warn('hello 2')
 ```
 
-Then, in another file (e.g. `main.js`).
+<a name="extreme"></a>
+## Extreme mode explained
 
-```javascript
-var seneca = require('seneca')({default_plugins:{'mem-store':false}}) // disable store in this service
+In essence, Extreme mode enables extreme performance by buffering log messages and writing them in larger chunks.
 
-var client = seneca.client({
-  host: 'localhost',
-  port: '4050',
-  pins: [{role: 'entity', cmd: '*'}, {cmd: 'ensure_entity'}, {cmd: 'define_sys_entity'}]  // pin actions from other service
+This has a couple of important caveats:
+
+* 4KB of spare RAM will be needed for logging
+* As opposed to the default mode, there is not a one-to-one relationship between calls to logging methods (e.g. `logger.info`) and writes to a log file (or log stream)
+* There is a possibility of the most recently buffered log messages being lost (up to 4KB of logs)
+  * For instance, a powercut will mean up to 4KB of buffered logs will be lost
+  * A sigkill (or other untrappable signal) will probably result in the same
+  * If writing to a stream other than `process.stdout` or `process.stderr`, there is a slight possibility of lost logs or even partially written logs if the OS buffers don't have enough space, or something else is being written to the stream (or maybe some other reason we've not thought of)
+
+So in summary, only use extreme mode if you're doing an extreme amount of logging, and you're happy in some scenarios to lose the most recent logs.
+
+
+<a name="express"></a>
+## How to use Pino with Express
+
+We've got you covered:
+
+```sh
+npm install --save express-pino-logger
+```
+
+```js
+var app = require('express')()
+var pino = require('express-pino-logger')()
+
+app.use(pino)
+
+app.get('/', function (req, res) {
+  req.log.info('something')
+  res.send('hello world')
 })
 
-// sample db usage
-client.make$('fruit').save$({name: 'apple'}, function (err, res) {
-  if (err) console.error(err)
+app.listen(3000)
+```
 
-  client.make$('fruit').load$({name: 'apple'}, function (err, res) {
-    if (err) console.error(err)
-    console.log('res:' + res)
+See the [express-pino-logger readme](http://npm.im/express-pino-logger) for more info.
+
+<a name="hapi"></a>
+## How to use Pino with Hapi
+
+We've got you covered:
+
+```sh
+npm install --save hapi-pino
+```
+
+```js
+'use strict'
+
+const Hapi = require('hapi')
+
+const server = new Hapi.Server()
+server.connection({ port: 3000 })
+
+server.route({
+  method: 'GET',
+  path: '/',
+  handler: function (request, reply) {
+    request.logger.info('In handler %s', request.path)
+    return reply('hello world')
+  }
+})
+
+server.register(require('hapi-pino'), (err) => {
+  if (err) {
+    console.error(err)
+    process.exit(1)
+  }
+
+  server.logger().info('another way for accessing it')
+
+  // Start the server
+  server.start((err) => {
+    if (err) {
+      console.error(err)
+      process.exit(1)
+    }
   })
 })
 ```
 
-## close([done])
-- __done:__ function, optional, callback with signature function(err), called after all close actions are complete.
+See the [hapi-pino readme](http://npm.im/hapi-pino) for more info.
 
-The close method terminates seneca. `err` param in the callback function contains an error if one occured during termination(`{role:seneca, cmd:close}`).
+<a name="restify"></a>
+## How to use Pino with Restify
 
-```javascript
-seneca.close(function (err) {
-  if (err) console.error('err: ' + err)
-})
+We've got you covered:
+
+```sh
+npm install --save restify-pino-logger
 ```
 
-## export(name)
+```js
+var server = require('restify').createServer({name: 'server'})
+var pino = require('restify-pino-logger')()
 
-- __name:__ string, reference to an object provided by a plugin.
+server.use(pino)
 
-The export method returns an object provided by a plugin.
+server.get('/', function (req, res) {
+  req.log.info('something')
+  res.send('hello world')
+})
 
-___Example: Existing plugins (e.g. options plugin)___
+server.listen(3000)
+```
 
-To use options plugin, define `options.js` file (or any other name) with some sample plugin configuration.
+See the [restify-pino-logger readme](http://npm.im/restify-pino-logger) for more info.
 
-```javascript
-module.exports = {
-  'mongo-store': {
-    host: 'localhost',
-    port: 27017,
-    name: 'somedb'
-  },
-  'redis-store': {
-    host: 'localhost',
-    port: 6379
-  }
+<a name="koa"></a>
+## How to use Pino with koa
+
+We've got you covered:
+
+### Koa v1
+
+```sh
+npm install --save koa-pino-logger@1
+```
+
+```js
+var app = require('koa')()
+var pino = require('koa-pino-logger')()
+
+app.use(pino)
+
+app.use(function * () {
+  this.log.info('something else')
+  this.body = 'hello world'
+})
+
+app.listen(3000)
+```
+
+See the [koa-pino-logger v1 readme](https://github.com/davidmarkclements/koa-pino-logger/tree/v1) for more info.
+
+### Koa v2
+
+```sh
+npm install --save koa-pino-logger@2
+```
+
+```js
+var Koa = require('koa')
+var app = new Koa()
+var pino = require('koa-pino-logger')()
+
+app.use(pino)
+
+app.use((ctx) => {
+  ctx.log.info('something else')
+  ctx.body = 'hello world'
+})
+
+app.listen(3000)
+```
+
+See the [koa-pino-logger v2 readme](https://github.com/davidmarkclements/koa-pino-logger/tree/v2) for more info.
+
+
+<a name="rotate"></a>
+## How do I rotate log files
+
+Use a separate tool for log rotation.
+
+We recommend [logrotate](https://github.com/logrotate/logrotate)
+
+Consider we output our logs to `/var/log/myapp.log` like so:
+
+```
+> node server.js > /var/log/myapp.log
+```
+
+We would rotate our log files with logrotate, by adding the following to `/etc/logrotate.d/myapp`:
+
+```
+/var/log/myapp.log {
+       su root
+       daily
+       rotate 7
+       delaycompress
+       compress
+       notifempty
+       missingok
+       copytruncate
 }
-
 ```
 
-Load in options plugin and then call `seneca.export` on it
+<a name="transports"></a>
+## How to use Transports with Pino
 
-```javascript
-seneca.use('options', 'options.js')
+Create a separate process and pipe to it.
 
-var options = seneca.export('options')
-```
+For example:
 
-___Example: Your own plugin___
+```js
+var split = require('split2')
+var pump = require('pump')
+var through = require('through2')
 
-At the bottom of your own plugin - in the return block - define an `export` field and assign its value to an object.
-
-```javascript
-module.exports = function (options) {
-  var seneca = this
-
-  // example object
-  var someobj = {
-    q: 'whatever',
-    params: []
-  }
-
-  return {
-    name: 'someplugin',
-    export: someobj // the important line
-  }
-}
-```
-
-Then use `seneca.export` as usual.
-
-```javascript
-seneca.use('someplugin')
-
-var someobj = seneca.export('someplugin')
-```
-
-## listen(options)
-- __options__  - `object`: transport options.
-
-The listen method tells the underlying transport to start listening for traffic.
-This method is usually called last, after you have finished any setup and have
-loaded all plugins. The built-in transport supports HTTP and TCP. The default
-port is set to `10101`, while the default transport type is HTTP.
-
-```javascript
-seneca.ready(function (err) {
-  if (err) return
-
-  seneca.listen()
-})
-```
-
-___Example: calling listen on port 10101 over http___
-
-The options object for this method allows you to set the `type`, `host` and `port`
-settings for the default transport. The exact options that you need vary by
-transport plugin. If you are using a custom transport, consult its documentation
-for information on the available options.
-
-
-```javascript
-seneca.ready(function (err) {
-  if (err) return
-
-  seneca.listen({
-    type: 'tcp',
-    host: '192.168.1.200',
-    port: '4050'
-  })
-})
-```
-
-___Example: calling listen on a custom host and port over tcp___
-
-Seneca allows multiple transport types to be run simultaneously over different
-ports. This gives clients maximum flexibility with minimal setup.
-
-## log._level_([entry, ..])
-- __entry:__ JavaScript value, converted to string.
-
-The log._level_ method outputs information in similar manner to console._level_ (e.g. `console.error`). Specifying the level allows us to filter these logs.
-
-```javascript
-seneca.log.info('Seneca just finished doing this important step')
-seneca.log.warn('You should NOT do this')
-seneca.log.error('Oh no!')
-seneca.log.fatal('Terminating due to...')
-seneca.log.debug('Args for this function are: ' + someObj)
-
-```
-
-These logs can be filtered by running the app with `--seneca.log=level:{?}` flag. For example, if your source file was called `main.js`:
-
-```
-node main.js --seneca.log=level:info
-node main.js --seneca.log=level:warn
-node main.js --seneca.log=level:error
-node main.js --seneca.log=level:fatal
-node main.js --seneca.log=level:debug
-```
-
-Note that `seneca.log.debug` will not output if `--seneca.log=level:debug` flag is not used. For more information on the `--seneca.log` flag see [logging tutorial][].
-
-## make(entity-canon [, properties])
-- __entity-canon__ - `string`
-- __properties__ - `object`: optional, default data for the new entity.
-
-This method creates new entities using the built-in [Data entity][] functionality.
-The `entity-canon` string is documented in [Entity canon format][]. It is
-essentially a namespaced way to refer to the same type or shape of object for
-storage purposes:
-
-```javascript
-var stockItem = seneca.make('stock-item')
-stockItem.price = 1.22
-stockItem.quantity = 22
-```
-
-A set of default or pre-set options can be passed to the above method to create
-a pre-populated object:
-
-```javascript
-var stockItem = seneca.make('stock-item', {
-  stockItem.price = 0.00
-  stockItem.quantity = 0
-})
-```
-
-## pin(pin-pattern)
-- __pin-pattern:__ object or string.
-
-The pin method builds an object from selected actions. The options object for this method allows you to specify the `role` and `cmd` as filters.
-
-```javascript
-var cmd = seneca.pin({role: '*', cmd: '*'})
-```
-
-___Example: Storing all math actions in an object___
-
-First, define the actions.
-
-```javascript
-seneca.add({role: 'math', cmd: 'add'}, function (msg, respond) {
-  return respond(null, { answer: msg.left + msg.right })
+var myTransport = through.obj(function (chunk, enc, cb) {
+  // do whatever you want here!
+  console.log(chunk)
+  cb()
 })
 
-seneca.add({role: 'math', cmd: 'subtract'}, function (msg, respond) {
-  return respond(null, { answer: msg.left - msg.right })
-})
-
-seneca.add({role: 'math', cmd: 'multiply'}, function (msg, respond) {
-  return respond(null, { answer: msg.left * msg.right })
-})
-
-// note: not part of math role
-seneca.add({role: 'foo', cmd: 'bar'}, function (msg, respond) {
-  return respond(null, { answer: msg.left * msg.right })
-})
+pump(process.stdin, split2(JSON.parse), myTransport)
 ```
 
-Then use the pin method.
-
-```javascript
-var math = seneca.pin({role: 'math', cmd: '*'})
-
-math.add({left: 3, right: 2}, function (err, res) {
-  if (err) return console.error(err)
-  console.log('add: ' + res.answer)
-})
-
-math.subtract({left: 3, right: 2}, function (err, res) {
-  if (err) return console.error(err)
-  console.log('subtract: ' + res.answer)
-})
-
-math.multiply({left: 3, right: 2}, function (err, res) {
-  if (err) return console.error(err)
-  console.log('multiply: ' + res.answer)
-})
-
-// this will produce error as bar is part of foo, not math
-math.bar({}, function (err, res) {
-  if (err) return console.error(err)
-  console.log('bar: ' + res.answer)
-})
-```
-<!--[pin pattern format](/desc-pin-pattern-format)-->
-
-## ready(callback)
-- __ready__ - `function (err)`: callback to execute after all plugins initialize.
-  If an error occurs during the startup process then the callback function will
-  have an Error instance passed to it.
-
-This method takes a callback function as an argument. You should complete the
-initialization of other parts of your app, such as setting up HTTP listeners,
-inside this callback.
-
-```javascript
-seneca.use('mongo-store', {...})
-
-seneca.ready(function (err) {
-  // handle err / start inserting data.
-})
+```sh
+node my-app-which-logs-stuff-to-stdout.js | node my-transport-process.js
 ```
 
-___Example: waiting for the database connection before inserting data___
+Using transports in the same process causes unnecessary load and slows down Node's single threaded event loop.
 
-You can call `ready` more than once. If you need to register additional plugins
-dynamically (this is perfectly fine), you can call `ready` again to wait for the
-new plugins to initialize. Seneca also emits a `'ready'` event, which you can
-also use:
+If you write a transport, let us know and we will add a link here!
 
-```javascript
-seneca.on('ready', function (err) {...})
+<a name="pino-socket"></a>
+### pino-socket
+
+[pino-socket][pino-socket] is a transport that will forward logs to a IPv4
+UDP or TCP socket. As an example, use `socat` to fake a listener:
+
+```sh
+$ socat -v udp4-recvfrom:6000,fork exec:'/bin/cat'
 ```
 
-___Example: adding callback for the ready event, emitted by Seneca___
+And then run an application that uses `pino` for logging:
 
-They both achieve the same result. It's a matter of preference which you use.
-
-## use(module [, options])
-- __module:__ - `function`: function to execute to initialize the plugin
-- __options:__ - `object`: options for the plugin. Contents depend on plugin.
-
-The use method *loads and registers plugins*. You can refer directly to built-in
-plugins by name; for example, [`echo`](https://github.com/rjrodger/seneca-echo),
-[`settings`](https://github.com/rjrodger/seneca-settings),
-[`mem-store`](https://github.com/senecajs/seneca-mem-store).
-
-After a plugin is installed, you can refer to it by the module name.
-
-For convenience, you can omit the `seneca-` prefix on standard plugins.
-
-```javascript
-seneca.use('mem-store', {
-  web: {
-    dump: true
-  }
-})
+```sh
+$ node yourapp.js | pino-socket -p 6000
 ```
 
-## use(name [, options])
-- __name:__ - `string`: name of the plugin. Used to build the argument to the
-  require function.
-- __options:__ - `object`: options for the plugin. Contents depend on plugin.
+You should see the logs from your application on both consoles.
 
-___Example: registering the built-in mem-store plugin with custom options___
+[pino-socket]: https://www.npmjs.com/package/pino-socket
 
-The second argument to the `use` method is an `options` object, which contains
-configuration properties specific to the plugin. Refer to the documentation for
-each plugin to find out how to use them. If you're using the options plugin,
-properties in the options argument override externally loaded options.
+<a name="caveats"></a>
+## Caveats
 
-# Plugin Interface
+There's some fine points to be aware of, which are a result of worthwhile trade-offs:
 
-Each plugin has the option to define an action with the pattern `init: name`. If
-this action is defined, it is called in series and in order for any plugins that
-define it. You can ensure that database connections and other external
-dependencies are in place before using them. **Just a reminder:** the order of
-plugin registration is significant.
+### 11 Arguments
 
-[logging tutorial]: /tutorials/logging-with-seneca.html
-[plugins]: /plugins/
-[get in touch]: https://gitter.im/senecajs/seneca
-[Data entity]: /tutorials/understanding-data-entities.html
-[Entity canon format]:
+The logger functions (e.g. `pino.info`) can take a maximum of 11 arguments.
+
+If you need more than that to write a log entry, you're probably doing it wrong.
+
+### Duplicate Keys
+
+It's possible for naming conflicts to arise between child loggers and
+children of child loggers.
+
+This isn't as bad as it sounds, even if you do use the same keys between
+parent and child loggers Pino resolves the conflict in the sanest way.
+
+For example, consider the following:
+
+```js
+var pino = require('pino')
+var fs = require('fs')
+pino(fs.createWriteStream('./my-log'))
+  .child({a: 'property'})
+  .child({a: 'prop'})
+  .info('howdy')
+```
+
+```sh
+$ cat my-log
+{"pid":95469,"hostname":"MacBook-Pro-3.home","level":30,"msg":"howdy","time":1459534114473,"a":"property","a":"prop","v":1}
+```
+
+Notice how there's two key's named `a` in the JSON output. The sub-childs properties
+appear after the parent child properties. This means if we run our logs through `pino -t` (or convert them to objects in any other way) we'll end up with one `a` property whose value corresponds to the lowest child in the hierarchy:
+
+```sh
+$ cat my-log | pino -t
+{"pid":95469,"hostname":"MacBook-Pro-3.home","level":30,"msg":"howdy","time":"2016-04-01T18:08:34.473Z","a":"prop","v":1}
+```
+
+This equates to the same log output that Bunyan supplies.
+
+One of Pino's performance tricks is to avoid building objects and stringifying
+them, so we're building strings instead. This is why duplicate keys between
+parents and children will end up in log output.
+
+<a name="team"></a>
